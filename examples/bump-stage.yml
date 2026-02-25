@@ -1,0 +1,98 @@
+# Manual stage promotion: canary -> release version.
+#
+# Triggered manually via workflow_dispatch. Validates that the last commit
+# is a canary pre-release, then bumps to a clean release version.
+#
+# Flow:
+#   1. Generate acpe-bot token
+#   2. Validate last commit is a canary version (e.g., v0.4.0-canary.3)
+#   3. Run bump script to strip prerelease suffix (-> v0.4.0)
+#   4. Push version bump commit to main
+#   5. Create GitHub pre-release (stage, not yet "latest")
+
+name: Bump stage
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump-stage:
+    name: Bump stage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate acpe-bot token
+        id: acpe-bot-token
+        uses: acp-io/acpe-bot/.github/actions/generate-token@main
+        with:
+          app-id: ${{ vars.ACPE_BOT_APP_ID }}
+          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.acpe-bot-token.outputs.token }}
+
+      - name: Check if last commit is a canary pre-release
+        id: check-canary
+        run: |
+          LAST_COMMIT=$(git log -1 --pretty=%B | head -n1)
+          echo "Last commit message: $LAST_COMMIT"
+
+          VERSION="${LAST_COMMIT#v}"
+
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.[0-9]+$ ]]; then
+            echo "is_canary=true" >> $GITHUB_OUTPUT
+            echo "Last commit is a canary pre-release: $VERSION"
+          else
+            echo "is_canary=false" >> $GITHUB_OUTPUT
+            echo "Last commit is NOT a canary pre-release: $LAST_COMMIT"
+            exit 1
+          fi
+
+      - name: Configure git user
+        run: |
+          git config --local user.name "acpe-bot[bot]"
+          git config --local user.email "${{ vars.ACPE_BOT_APP_ID }}+acpe-bot[bot]@users.noreply.github.com"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          run_install: true
+
+      - name: Run bump script
+        run: pnpm run bump --from-commit --type release
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ steps.acpe-bot-token.outputs.token }}
+          branch: ${{ github.ref_name }}
+
+      - name: Get new version
+        id: get-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release-notes
+        run: pnpm run release:notes --github-output
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ steps.acpe-bot-token.outputs.token }}
+          tag_name: ${{ steps.get-version.outputs.tag }}
+          name: ${{ steps.get-version.outputs.tag }}
+          prerelease: true
+          body: ${{ steps.release-notes.outputs.notes }}

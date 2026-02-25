@@ -1,0 +1,133 @@
+# Multi-environment Vercel deployment with PR preview comments.
+#
+# Triggered by:
+#   - Pull requests (opened, synchronize) -> preview deployment
+#   - Releases (prereleased, released) -> environment deployment
+#
+# Environment determination:
+#   - PR number present -> preview
+#   - Tag contains "canary" -> dev
+#   - Release is pre-release -> stage
+#   - Otherwise -> prod
+#
+# This workflow uses acpe-bot for posting PR preview comments.
+# Vercel deployment uses separate VERCEL_* secrets.
+
+name: Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  release:
+    types: [prereleased, released]
+
+env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  VERCEL_SCOPE: ${{ secrets.VERCEL_ORG_ID }}
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.determine-env.outputs.env }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          run_install: true
+
+      - name: Install Vercel CLI
+        run: pnpm add -g vercel@latest vercel-deployer@0.0.1-canary.3 shadcn@latest
+
+      - name: Run format check
+        run: pnpm run check
+
+      - name: Run build
+        run: pnpm run build
+
+      - name: Determine Environment
+        id: determine-env
+        run: |
+          echo "env=$(
+            if [[ "${{ github.event.pull_request.number }}" != "" ]]; then
+              echo "preview"
+            elif [[ "${{ contains(github.event.release.tag_name, 'canary') }}" == "true" ]]; then
+              echo "dev"
+            elif [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
+              echo "stage"
+            else
+              echo "prod"
+            fi
+          )" >> $GITHUB_OUTPUT
+
+      - name: Build registry
+        run: pnpm run build:registry
+
+      - name: Set correct alias
+        id: set-alias
+        run: |
+          echo "alias=$(
+            if [[ "${{ steps.determine-env.outputs.env }}" == "prod" ]]; then
+              echo "registry.acp.io"
+            elif [[ "${{ steps.determine-env.outputs.env }}" == "dev" ]]; then
+              echo "registry.dev.acp.io"
+            elif [[ "${{ github.event.pull_request.number }}" != "" ]]; then
+              echo "registry-${{ github.event.pull_request.number }}-acp-io.vercel.app"
+            else
+              echo "registry-${{ steps.determine-env.outputs.env }}-acp-io.vercel.app"
+            fi
+          )" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Vercel
+        id: vercel-deploy
+        run: |
+          npx vercel-deployer \
+          -a ${{ steps.set-alias.outputs.alias }}
+
+  post-preview-url:
+    needs: deploy
+    if: needs.deploy.outputs.env == 'preview'
+    name: Post preview URL
+    runs-on: ubuntu-latest
+    steps:
+      # acpe-bot token is used here to post PR comments as the bot identity.
+      # The default GITHUB_TOKEN would also work for this, but using acpe-bot
+      # keeps the attribution consistent across all automated actions.
+      - name: Generate acpe-bot token
+        id: acpe-bot-token
+        uses: acp-io/acpe-bot/.github/actions/generate-token@main
+        with:
+          app-id: ${{ vars.ACPE_BOT_APP_ID }}
+          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+
+      - name: Find existing preview comment
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "acpe-bot[bot]"
+          body-includes: Preview deployment available at
+
+      - name: Post preview URL comment
+        if: steps.find-comment.outputs.comment-id == ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.acpe-bot-token.outputs.token }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: 'Preview deployment available at: https://registry-${{ github.event.pull_request.number }}-acp-io.vercel.app'
+            })

@@ -1,0 +1,33 @@
+name: "Generate acpe-bot token"
+description: "Generate an installation access token for the acpe-bot GitHub App"
+
+inputs:
+  app-id:
+    description: "The app ID of the acpe-bot GitHub App"
+    required: true
+  private-key:
+    description: "The private key of the acpe-bot GitHub App"
+    required: true
+  owner:
+    description: "The owner of the GitHub App installation (defaults to current repository owner)"
+    required: false
+  repositories:
+    description: "Comma-separated list of repositories to grant access to (defaults to current repository)"
+    required: false
+
+outputs:
+  token:
+    description: "The installation access token"
+    value: ${{ steps.generate.outputs.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate installation access token
+      id: generate
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: ${{ inputs.owner }}
+        repositories: ${{ inputs.repositories }}

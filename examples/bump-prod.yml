@@ -1,0 +1,102 @@
+# Manual prod promotion: pre-release -> latest.
+#
+# Triggered manually via workflow_dispatch. Validates that the last commit
+# is a clean release version and that a matching pre-release exists,
+# then promotes it to "latest".
+#
+# Flow:
+#   1. Generate acpe-bot token
+#   2. Validate last commit is a release version (e.g., v0.4.0)
+#   3. Verify a pre-release exists for that tag
+#   4. Promote the release to latest (remove pre-release flag)
+
+name: Bump prod
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bump-prod:
+    name: Bump prod
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate acpe-bot token
+        id: acpe-bot-token
+        uses: acp-io/acpe-bot/.github/actions/generate-token@main
+        with:
+          app-id: ${{ vars.ACPE_BOT_APP_ID }}
+          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.acpe-bot-token.outputs.token }}
+
+      - name: Get release for latest commit
+        id: get-release
+        env:
+          GH_TOKEN: ${{ steps.acpe-bot-token.outputs.token }}
+        run: |
+          LAST_COMMIT=$(git log -1 --pretty=%B | head -n1)
+          echo "Last commit message: $LAST_COMMIT"
+
+          VERSION="${LAST_COMMIT#v}"
+          TAG="v$VERSION"
+
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release_version=true" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "Last commit is a release version: $VERSION"
+          else
+            echo "is_release_version=false" >> $GITHUB_OUTPUT
+            echo "Last commit is NOT a release version (may be canary or not a version): $LAST_COMMIT"
+            exit 1
+          fi
+
+      - name: Check if release is a pre-release
+        id: check-prerelease
+        env:
+          GH_TOKEN: ${{ steps.acpe-bot-token.outputs.token }}
+        run: |
+          TAG="${{ steps.get-release.outputs.tag }}"
+          echo "Checking release for tag: $TAG"
+
+          RELEASE_INFO=$(gh release view "$TAG" --json isPrerelease,isDraft 2>/dev/null || echo "NOT_FOUND")
+
+          if [[ "$RELEASE_INFO" == "NOT_FOUND" ]]; then
+            echo "No release found for tag: $TAG"
+            exit 1
+          fi
+
+          IS_PRERELEASE=$(echo "$RELEASE_INFO" | jq -r '.isPrerelease')
+          IS_DRAFT=$(echo "$RELEASE_INFO" | jq -r '.isDraft')
+
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Release info - prerelease: $IS_PRERELEASE, draft: $IS_DRAFT"
+
+          if [[ "$IS_PRERELEASE" != "true" ]]; then
+            echo "Release is already marked as latest (not a pre-release)"
+            exit 1
+          fi
+
+          if [[ "$IS_DRAFT" == "true" ]]; then
+            echo "Release is a draft, cannot promote"
+            exit 1
+          fi
+
+          echo "Release is a pre-release and can be promoted to latest"
+
+      - name: Promote release to latest
+        env:
+          GH_TOKEN: ${{ steps.acpe-bot-token.outputs.token }}
+        run: |
+          TAG="${{ steps.get-release.outputs.tag }}"
+          echo "Promoting release $TAG to latest..."
+
+          gh release edit "$TAG" --prerelease=false --latest
+
+          echo "Release $TAG has been promoted to latest"
