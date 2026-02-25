@@ -49,10 +49,10 @@ steps:
   - name: Configure git identity
     run: |
       git config --local user.name "acpe-bot[bot]"
-      git config --local user.email "<APP_ID>+acpe-bot[bot]@users.noreply.github.com"
+      git config --local user.email "263902341+acpe-bot[bot]@users.noreply.github.com"
 ```
 
-Replace `<APP_ID>` with the actual numeric app ID.
+> **Note:** The `263902341` is the **user ID** of the `acpe-bot[bot]` account (not the App ID). This is required for GitHub to render the app's avatar on commits. You can verify it with: `gh api '/users/acpe-bot[bot]' --jq .id`
 
 ## Repository structure
 

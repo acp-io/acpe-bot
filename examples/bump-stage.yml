@@ -56,7 +56,7 @@ jobs:
       - name: Configure git user
         run: |
           git config --local user.name "acpe-bot[bot]"
-          git config --local user.email "${{ vars.ACPE_BOT_APP_ID }}+acpe-bot[bot]@users.noreply.github.com"
+          git config --local user.email "263902341+acpe-bot[bot]@users.noreply.github.com"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
