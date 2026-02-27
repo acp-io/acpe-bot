@@ -1,0 +1,64 @@
+name: "Generate acpe-bot token"
+description: "Generate an installation access token for the acpe-bot GitHub App via the token vending service. No secrets required — authentication is handled via GitHub Actions OIDC."
+
+inputs:
+  owner:
+    description: "The owner of the GitHub App installation (defaults to current repository owner)"
+    required: false
+  repositories:
+    description: "Comma-separated list of repositories to grant access to (defaults to current repository)"
+    required: false
+
+outputs:
+  token:
+    description: "The installation access token"
+    value: ${{ steps.request-token.outputs.token }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Get OIDC token
+      id: oidc
+      shell: bash
+      run: |
+        OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=acpe-bot" | jq -r '.value')
+        echo "::add-mask::$OIDC_TOKEN"
+        echo "token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
+
+    - name: Request installation token
+      id: request-token
+      shell: bash
+      env:
+        ACPE_BOT_ENDPOINT: "https://6p42yowxmnoa2rtyqrj4oi3cqu0gdtfc.lambda-url.eu-central-1.on.aws"
+        OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        OWNER: ${{ inputs.owner || github.repository_owner }}
+        REPOSITORIES: ${{ inputs.repositories }}
+      run: |
+        # Build JSON body
+        BODY=$(jq -n \
+          --arg oidc_token "$OIDC_TOKEN" \
+          --arg owner "$OWNER" \
+          --arg repositories "$REPOSITORIES" \
+          '{
+            oidc_token: $oidc_token,
+            owner: $owner,
+            repositories: (if $repositories == "" then null else ($repositories | split(",") | map(gsub("^\\s+|\\s+$"; ""))) end)
+          }')
+
+        # Call the token vending service
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$ACPE_BOT_ENDPOINT" \
+          -H "Content-Type: application/json" \
+          -d "$BODY")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+
+        if [ "$HTTP_CODE" != "200" ]; then
+          echo "::error::Token request failed ($HTTP_CODE): $RESPONSE_BODY"
+          exit 1
+        fi
+
+        TOKEN=$(echo "$RESPONSE_BODY" | jq -r '.token')
+        echo "::add-mask::$TOKEN"
+        echo "token=$TOKEN" >> $GITHUB_OUTPUT

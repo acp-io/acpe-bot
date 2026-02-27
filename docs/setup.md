@@ -21,7 +21,7 @@ How to register, configure, and install the `acpe-bot` GitHub App.
 | Metadata | Read-only |
 | Pull requests | Read & write |
 
-4. Under "Where can this GitHub App be installed?", select **Only on this account**
+4. Under "Where can this GitHub App be installed?", select **Any account**
 5. Click **Create GitHub App**
 
 ## 2. Note the App ID
@@ -34,22 +34,24 @@ After creation, you'll land on the app's settings page. The **App ID** is displa
 2. Click **Generate a private key**
 3. A `.pem` file will download -- keep this safe
 
-## 4. Store Credentials
+## 4. Deploy the Token Vending Service
 
-### Org-level (recommended)
+The token vending service is an AWS Lambda that holds the private key and generates installation tokens for any org where `acpe-bot` is installed. Workflows authenticate via GitHub Actions OIDC -- no secrets are shared with consuming repositories.
 
-Store credentials at the org level so all `acp-io` repositories can use them:
+```bash
+cd infra
+pnpm install
+pnpm run build:functions
+pulumi config set app-id <your-app-id>
+pulumi config set --secret private-key "$(cat path/to/private-key.pem)"
+pulumi up
+```
 
-1. Go to [acp-io org variables](https://github.com/organizations/acp-io/settings/variables/actions)
-   - Create variable: `ACPE_BOT_APP_ID` = the numeric app ID
-2. Go to [acp-io org secrets](https://github.com/organizations/acp-io/settings/secrets/actions)
-   - Create secret: `ACPE_BOT_PRIVATE_KEY` = full contents of the `.pem` file (including `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----`)
-
-### Repository-level (alternative)
-
-If you only need the bot for a single repo, add the variable and secret at the repository level under Settings > Secrets and variables > Actions.
+After deployment, Pulumi outputs the `functionUrl` -- this is the endpoint baked into the action. Update `ACPE_BOT_ENDPOINT` in `action.yml` with this URL.
 
 ## 5. Install the App
+
+### In the acp-io org (owner)
 
 1. Go to the app settings page > **Install App** (left sidebar)
 2. Click **Install** next to the `acp-io` organization
@@ -57,13 +59,22 @@ If you only need the bot for a single repo, add the variable and secret at the r
    - **All repositories** -- gives `acpe-bot` access to every repo in the org
    - **Only select repositories** -- pick specific repos (e.g., `acpm-registry`)
 
-## 6. Verify the Setup
+### In an external org
 
-Create a test workflow in any repo where the app is installed:
+1. An org admin navigates to [github.com/apps/acpe-bot](https://github.com/apps/acpe-bot)
+2. Click **Install** and select the target organization
+3. Choose repository access (all or select repositories)
+4. No secrets needed -- use the `generate-token` action in workflows
+
+## 6. Verify the Setup
 
 ```yaml
 name: Test acpe-bot
 on: workflow_dispatch
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   test:
@@ -71,10 +82,7 @@ jobs:
     steps:
       - name: Generate acpe-bot token
         id: acpe-bot-token
-        uses: acp-io/acpe-bot/.github/actions/generate-token@main
-        with:
-          app-id: ${{ vars.ACPE_BOT_APP_ID }}
-          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+        uses: acp-io/acpe-bot@main
 
       - name: Test token
         env:
@@ -103,7 +111,11 @@ To rotate the private key:
 
 1. Go to the app settings page > **Private keys**
 2. Click **Generate a private key** (creates a new one)
-3. Update the `ACPE_BOT_PRIVATE_KEY` secret with the new `.pem` contents
+3. Update the Pulumi config:
+   ```bash
+   pulumi config set --secret private-key "$(cat new-key.pem)"
+   pulumi up
+   ```
 4. Delete the old private key from the app settings page
 
-Both keys are valid simultaneously until you delete the old one, so there's no downtime.
+Both keys are valid simultaneously until you delete the old one, so there's no downtime. The private key only exists in AWS Secrets Manager -- no GitHub org secrets to update.

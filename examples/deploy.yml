@@ -10,6 +10,10 @@
 #   - Release is pre-release -> stage
 #   - Otherwise -> prod
 #
+# Prerequisites:
+#   - acpe-bot is installed in the org (via github.com/apps/acpe-bot)
+#   - The workflow has `id-token: write` permission
+#
 # This workflow uses acpe-bot for posting PR preview comments.
 # Vercel deployment uses separate VERCEL_* secrets.
 
@@ -20,6 +24,11 @@ on:
     types: [opened, synchronize]
   release:
     types: [prereleased, released]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
 
 env:
   VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -106,10 +115,7 @@ jobs:
       # keeps the attribution consistent across all automated actions.
       - name: Generate acpe-bot token
         id: acpe-bot-token
-        uses: acp-io/acpe-bot/.github/actions/generate-token@main
-        with:
-          app-id: ${{ vars.ACPE_BOT_APP_ID }}
-          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+        uses: acp-io/acpe-bot@main
 
       - name: Find existing preview comment
         uses: peter-evans/find-comment@v3

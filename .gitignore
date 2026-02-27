@@ -13,3 +13,6 @@ Thumbs.db
 *.pem
 .env
 .env.*
+
+*node_modules
+*dist

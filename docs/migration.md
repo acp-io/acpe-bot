@@ -5,12 +5,22 @@ How to migrate existing workflows from Personal Access Tokens (`BUMP_PAT` / `ACP
 ## Prerequisites
 
 1. The `acpe-bot` GitHub App is registered and installed (see [setup.md](setup.md))
-2. Org-level variable `ACPE_BOT_APP_ID` and secret `ACPE_BOT_PRIVATE_KEY` are configured
+2. The token vending service is deployed (see [setup.md](setup.md))
 3. The app is installed on the target repository
 
 ## Migration Steps
 
-### Step 1: Add the token generation step
+### Step 1: Add OIDC permissions
+
+Add the `id-token: write` permission to your workflow. This is required for the OIDC token request:
+
+```yaml
+permissions:
+  id-token: write
+  contents: write
+```
+
+### Step 2: Add the token generation step
 
 Add this as the **first step** in your job, before the checkout step:
 
@@ -18,13 +28,12 @@ Add this as the **first step** in your job, before the checkout step:
 steps:
   - name: Generate acpe-bot token
     id: acpe-bot-token
-    uses: acp-io/acpe-bot/.github/actions/generate-token@main
-    with:
-      app-id: ${{ vars.ACPE_BOT_APP_ID }}
-      private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+    uses: acp-io/acpe-bot@main
 ```
 
-### Step 2: Replace PAT references
+No secrets or inputs are needed -- the action authenticates via GitHub Actions OIDC.
+
+### Step 3: Replace PAT references
 
 Replace every occurrence of the PAT secret with the generated token.
 
@@ -90,7 +99,7 @@ Replace every occurrence of the PAT secret with the generated token.
   run: gh release edit "$TAG" --prerelease=false --latest
 ```
 
-### Step 3: Update git identity
+### Step 4: Update git identity
 
 Replace `github-actions[bot]` with `acpe-bot[bot]`:
 
@@ -110,20 +119,21 @@ Replace `github-actions[bot]` with `acpe-bot[bot]`:
 
 Replace `<APP_ID>` with the actual numeric app ID.
 
-### Step 4: Test the pipeline
+### Step 5: Test the pipeline
 
 1. Push a change to `main` -- verify `bump-canary` creates a canary version commit and release
 2. Run `bump-stage` manually -- verify it promotes the canary to a clean release version
 3. Run `bump-prod` manually -- verify it promotes the pre-release to latest
 4. Open a PR -- verify deploy preview comments appear (if using the deploy workflow)
 
-### Step 5: Remove the PAT
+### Step 6: Remove the PAT and org secrets
 
 Once all workflows are verified:
 
 1. Go to the repository (or org) secrets settings
 2. Delete `BUMP_PAT` (or `ACPM_WEB_COMPONENTS_BUMP_PAT`)
-3. Revoke the PAT in the personal account that created it (Settings > Developer settings > Personal access tokens)
+3. Delete `ACPE_BOT_APP_ID` variable and `ACPE_BOT_PRIVATE_KEY` secret from org settings (no longer needed -- the private key only lives in AWS Secrets Manager)
+4. Revoke the PAT in the personal account that created it (Settings > Developer settings > Personal access tokens)
 
 ## Full Before/After Example
 
@@ -156,14 +166,12 @@ jobs:
   bump-canary:
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: write
     steps:
       - name: Generate acpe-bot token
         id: acpe-bot-token
-        uses: acp-io/acpe-bot/.github/actions/generate-token@main
-        with:
-          app-id: ${{ vars.ACPE_BOT_APP_ID }}
-          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+        uses: acp-io/acpe-bot@main
 
       - uses: actions/checkout@v4
         with:
@@ -180,11 +188,16 @@ jobs:
 
 ## Troubleshooting
 
-### Token generation fails with "could not create installation access token"
+### Token generation fails with "OIDC token verification failed"
 
-- Verify the app is installed on the repository
-- Verify `ACPE_BOT_APP_ID` variable and `ACPE_BOT_PRIVATE_KEY` secret are set correctly
-- Check if the private key has been rotated without updating the secret
+- Verify the workflow has `id-token: write` permission
+- Verify the token vending service is deployed and reachable
+- Check that the Lambda endpoint URL in the action matches the deployed function URL
+
+### Token generation fails with "No acpe-bot installation found"
+
+- Verify the app is installed on the repository's organization
+- Verify the app installation has access to the target repository
 
 ### Push fails with "permission denied"
 

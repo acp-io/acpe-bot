@@ -3,8 +3,12 @@
 # Triggered manually via workflow_dispatch. Validates that the last commit
 # is a canary pre-release, then bumps to a clean release version.
 #
+# Prerequisites:
+#   - acpe-bot is installed in the org (via github.com/apps/acpe-bot)
+#   - The workflow has `id-token: write` permission
+#
 # Flow:
-#   1. Generate acpe-bot token
+#   1. Generate acpe-bot token via OIDC (no secrets needed)
 #   2. Validate last commit is a canary version (e.g., v0.4.0-canary.3)
 #   3. Run bump script to strip prerelease suffix (-> v0.4.0)
 #   4. Push version bump commit to main
@@ -15,20 +19,19 @@ name: Bump stage
 on:
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   bump-stage:
     name: Bump stage
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Generate acpe-bot token
         id: acpe-bot-token
-        uses: acp-io/acpe-bot/.github/actions/generate-token@main
-        with:
-          app-id: ${{ vars.ACPE_BOT_APP_ID }}
-          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+        uses: acp-io/acpe-bot@main
 
       - name: Checkout repository
         uses: actions/checkout@v4

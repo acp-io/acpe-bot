@@ -4,8 +4,12 @@
 # is a clean release version and that a matching pre-release exists,
 # then promotes it to "latest".
 #
+# Prerequisites:
+#   - acpe-bot is installed in the org (via github.com/apps/acpe-bot)
+#   - The workflow has `id-token: write` permission
+#
 # Flow:
-#   1. Generate acpe-bot token
+#   1. Generate acpe-bot token via OIDC (no secrets needed)
 #   2. Validate last commit is a release version (e.g., v0.4.0)
 #   3. Verify a pre-release exists for that tag
 #   4. Promote the release to latest (remove pre-release flag)
@@ -15,20 +19,19 @@ name: Bump prod
 on:
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   bump-prod:
     name: Bump prod
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Generate acpe-bot token
         id: acpe-bot-token
-        uses: acp-io/acpe-bot/.github/actions/generate-token@main
-        with:
-          app-id: ${{ vars.ACPE_BOT_APP_ID }}
-          private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
+        uses: acp-io/acpe-bot@main
 
       - name: Checkout repository
         uses: actions/checkout@v4

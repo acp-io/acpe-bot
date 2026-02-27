@@ -62,13 +62,11 @@ If a future use case requires modifying workflow files, the permission can be ad
 
 ## Token Scoping at Runtime
 
-Even with these permissions granted to the app, individual tokens can be further scoped at generation time using `actions/create-github-app-token@v2`:
+Even with these permissions granted to the app, individual tokens can be further scoped at generation time by passing `repositories` to the action:
 
 ```yaml
-- uses: actions/create-github-app-token@v2
+- uses: acp-io/acpe-bot@main
   with:
-    app-id: ${{ vars.ACPE_BOT_APP_ID }}
-    private-key: ${{ secrets.ACPE_BOT_PRIVATE_KEY }}
     repositories: "acpm-registry"  # Limit to specific repos
 ```
 
