@@ -1,6 +1,0 @@
-name: acpe-bot
-runtime:
-  name: nodejs
-  options:
-    packagemanager: pnpm
-description: Token vending service for the acpe-bot GitHub App
